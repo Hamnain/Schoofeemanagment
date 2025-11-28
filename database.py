@@ -72,7 +72,7 @@ def setup_database():
     )
     """)
     
-    # --- 5. Create Users Table for Login ---
+    # --- 5. Create Users Table ---
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,13 +81,10 @@ def setup_database():
     )
     """)
     
-    # Create Default Admin User if none exists
     cursor.execute("SELECT * FROM users WHERE username = 'admin'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", ('admin', 'admin'))
-        print("Default user 'admin' created with password 'admin'.")
 
-    # Add photo_path if missing (Legacy check)
     try:
         cursor.execute("ALTER TABLE students ADD COLUMN photo_path TEXT")
     except sqlite3.OperationalError:
@@ -96,26 +93,6 @@ def setup_database():
     conn.commit()
     conn.close()
     print("Database and tables created successfully.")
-
-# === LOGIN FUNCTIONS ===
-
-def check_login(username, password):
-    """Verifies username and password."""
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
-    user = cursor.fetchone()
-    conn.close()
-    return user is not None
-
-def update_password(username, new_password):
-    """Updates the password for a specific user."""
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
-    conn.commit()
-    conn.close()
-    return True
 
 # === STUDENT FUNCTIONS ===
 
@@ -268,30 +245,70 @@ def pay_challan(challan_id, payment_date):
     conn.commit()
     conn.close()
 
-# === REPORTING FUNCTIONS ===
-
-def get_student_fee_summary():
+def check_login(username, password):
+    """Verifies username and password."""
     conn = connect_db()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT s.student_id, s.full_name, s.class_into_which_admission_is_sought, s.contact_details,
-        SUM(CASE WHEN c.status = 'Unpaid' THEN c.total_amount ELSE 0 END) as total_due
-        FROM students s LEFT JOIN challans c ON s.student_id = c.student_id
-        WHERE s.status = 'Active' GROUP BY s.student_id ORDER BY total_due DESC
+    cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+    user = cursor.fetchone()
+    conn.close()
+    return user is not None
+
+def update_password(username, new_password):
+    """Updates the password for a specific user."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
+    conn.commit()
+    conn.close()
+    return True
+
+# === REPORTING FUNCTIONS (UPDATED FOR DEFAULTER LOGIC) ===
+
+def get_student_fee_summary():
+    """
+    Separates 'Overdue' (Defaulters) from 'Pending' (Not yet overdue).
+    """
+    conn = connect_db()
+    cursor = conn.cursor()
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    
+    # This query groups by student and sums up Overdue vs Pending amounts
+    cursor.execute(f"""
+        SELECT 
+            s.student_id, 
+            s.full_name, 
+            s.class_into_which_admission_is_sought, 
+            s.contact_details,
+            SUM(CASE WHEN c.status = 'Unpaid' AND c.due_date < '{today}' THEN c.total_amount ELSE 0 END) as overdue_amount,
+            SUM(CASE WHEN c.status = 'Unpaid' AND c.due_date >= '{today}' THEN c.total_amount ELSE 0 END) as pending_amount
+        FROM students s
+        LEFT JOIN challans c ON s.student_id = c.student_id
+        WHERE s.status = 'Active'
+        GROUP BY s.student_id
+        ORDER BY overdue_amount DESC, s.full_name ASC
     """)
     summary = cursor.fetchall()
     conn.close()
     return summary
 
 def get_classwise_defaulter_list():
+    # Returns students who have OVERDUE amounts only
     conn = connect_db()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT s.class_into_which_admission_is_sought, s.full_name, SUM(c.total_amount) as total_due
-        FROM students s JOIN challans c ON s.student_id = c.student_id
-        WHERE c.status = 'Unpaid' AND s.status = 'Active'
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    
+    cursor.execute(f"""
+        SELECT 
+            s.class_into_which_admission_is_sought, 
+            s.full_name, 
+            SUM(c.total_amount) as total_due
+        FROM students s 
+        JOIN challans c ON s.student_id = c.student_id
+        WHERE c.status = 'Unpaid' AND c.due_date < '{today}' AND s.status = 'Active'
         GROUP BY s.class_into_which_admission_is_sought, s.full_name
-        HAVING total_due > 0 ORDER BY s.class_into_which_admission_is_sought, s.full_name
+        HAVING total_due > 0 
+        ORDER BY s.class_into_which_admission_is_sought, s.full_name
     """)
     defaulters = cursor.fetchall()
     conn.close()
