@@ -303,6 +303,7 @@ class FeesWindow:
         for sid in selected:
             create_challan(int(sid), issue, due, "Unpaid", [("Tuition Fee", 5000)], 0, 0)
         messagebox.showinfo("Success", "Generated"); top.destroy(); self.class_listbox.event_generate("<<ListboxSelect>>")
+        self._refresh_dashboard()
 
     # --- TAB 3: MANAGE INDIVIDUAL ---
     def _create_individual_ui(self, parent):
@@ -344,7 +345,10 @@ class FeesWindow:
 
     def record_payment(self):
         sel = self.challan_tree.selection()
-        if sel: pay_challan(int(self.challan_tree.item(sel[0])['values'][0]), datetime.date.today().strftime("%Y-%m-%d")); self.load_student_challans()
+        if sel: 
+            pay_challan(int(self.challan_tree.item(sel[0])['values'][0]), datetime.date.today().strftime("%Y-%m-%d"))
+            self.load_student_challans()
+            self._refresh_dashboard()
 
     # --- TAB 4: REPORTS ---
     def _create_reports_ui(self, parent):
@@ -373,7 +377,7 @@ class FeesWindow:
         
         tk.Label(sel_frame, text="Select Current Class:", bg=COLOR_WHITE).pack(side=tk.LEFT, padx=10)
         self.promo_class_var = tk.StringVar()
-        self.promo_class_cb = ttk.Combobox(sel_frame, textvariable=self.promo_class_var, values=CLASS_LIST[:-1]) # Exclude "Passed Out"
+        self.promo_class_cb = ttk.Combobox(sel_frame, textvariable=self.promo_class_var, values=CLASS_LIST[:-1]) 
         self.promo_class_cb.pack(side=tk.LEFT, padx=10)
         self.promo_class_cb.bind("<<ComboboxSelected>>", self._update_promotion_target)
         
